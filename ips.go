@@ -7,6 +7,16 @@ type ipAddressListResponse struct {
 	Items      []string `json:"items"`
 }
 
+type ipDomainListResponse struct {
+	TotalCount int         `json:"total_count"`
+	Items      []DomainIPs `json:"items"`
+}
+
+type DomainIPs struct {
+	Domain string   `json:"domain"`
+	IPs    []string `json:"ips"`
+}
+
 type IPAddress struct {
 	IP        string `json:"ip"`
 	RDNS      string `json:"rdns"`
@@ -46,6 +56,20 @@ func (mg *MailgunImpl) GetIP(ctx context.Context, ip string) (IPAddress, error) 
 	var resp IPAddress
 	err := getResponseFromJSON(ctx, r, &resp)
 	return resp, err
+}
+
+// ListIPDomains returns a list of domains currently assigned to the specified ip.
+func (mg *MailgunImpl) ListIPDomains(ctx context.Context, ip string) ([]DomainIPs, error) {
+	r := newHTTPRequest(generatePublicApiUrl(mg, ipsEndpoint) + "/" + ip + "/domains")
+	r.setClient(mg.Client())
+	r.setBasicAuth(basicAuthUser, mg.APIKey())
+
+	var resp ipDomainListResponse
+	if err := getResponseFromJSON(ctx, r, &resp); err != nil {
+		return nil, err
+	}
+
+	return resp.Items, nil
 }
 
 // ListDomainIPS returns a list of IPs currently assigned to the specified domain.
