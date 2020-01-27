@@ -133,7 +133,7 @@ type Mailgun interface {
 
 	ListBounces(opts *ListOptions) *BouncesIterator
 	GetBounce(ctx context.Context, address string) (Bounce, error)
-	AddBounce(ctx context.Context, address, code, error string) error
+	AddBounce(ctx context.Context, address, code, err string) error
 	DeleteBounce(ctx context.Context, address string) error
 
 	GetStats(ctx context.Context, events []string, opts *GetStatOptions) ([]Stats, error)
@@ -190,6 +190,7 @@ type Mailgun interface {
 	GetWebhook(ctx context.Context, kind string) ([]string, error)
 	UpdateWebhook(ctx context.Context, kind string, url []string) error
 	VerifyWebhookRequest(req *http.Request) (verified bool, err error)
+	VerifyWebhookSignature(sig Signature) (verified bool, err error)
 
 	ListMailingLists(opts *ListOptions) *ListsIterator
 	CreateMailingList(ctx context.Context, address MailingList) (MailingList, error)

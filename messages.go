@@ -37,6 +37,7 @@ type Message struct {
 	trackingOpens      bool
 	headers            map[string]string
 	variables          map[string]string
+	templateVariables  map[string]interface{}
 	recipientVariables map[string]map[string]interface{}
 	domain             string
 
@@ -116,6 +117,7 @@ type plainMessage struct {
 	subject  string
 	text     string
 	html     string
+	ampHtml  string
 	template string
 }
 
@@ -130,8 +132,8 @@ type sendMessageResponse struct {
 }
 
 // features abstracts the common characteristics between regular and MIME messages.
-// addCC, addBCC, recipientCount, and setHTML are invoked via the package-global AddCC, AddBCC,
-// RecipientCount, and SetHtml calls, as these functions are ignored for MIME messages.
+// addCC, addBCC, recipientCount, setHtml and setAMPHtml are invoked via the package-global AddCC, AddBCC,
+// RecipientCount, SetHtml and SetAMPHtml calls, as these functions are ignored for MIME messages.
 // Send() invokes addValues to add message-type-specific MIME headers for the API call
 // to Mailgun.  isValid yeilds true if and only if the message is valid enough for sending
 // through the API.  Finally, endpoint() tells Send() which endpoint to use to submit the API call.
@@ -139,6 +141,7 @@ type features interface {
 	addCC(string)
 	addBCC(string)
 	setHtml(string)
+	setAMPHtml(string)
 	addValues(*formDataPayload)
 	isValid() bool
 	endpoint() string
@@ -296,6 +299,7 @@ func (m *Message) send(ctx context.Context) (string, string, error) {
 	return m.mg.Send(ctx, m)
 }
 
+// SetReplyTo sets the receiver who should receive replies
 func (m *Message) SetReplyTo(recipient string) {
 	m.AddHeader("Reply-To", recipient)
 }
@@ -322,7 +326,7 @@ func (pm *plainMessage) addBCC(r string) {
 
 func (mm *mimeMessage) addBCC(_ string) {}
 
-// If you're sending a message that isn't already MIME encoded, SetHtml() will arrange to bundle
+// SetHtml is a helper. If you're sending a message that isn't already MIME encoded, SetHtml() will arrange to bundle
 // an HTML representation of your message in addition to your plain-text body.
 func (m *Message) SetHtml(html string) {
 	m.specific.setHtml(html)
@@ -333,6 +337,18 @@ func (pm *plainMessage) setHtml(h string) {
 }
 
 func (mm *mimeMessage) setHtml(_ string) {}
+
+// SetAMP is a helper. If you're sending a message that isn't already MIME encoded, SetAMP() will arrange to bundle
+// an AMP-For-Email representation of your message in addition to your html & plain-text content.
+func (m *Message) SetAMPHtml(html string) {
+	m.specific.setAMPHtml(html)
+}
+
+func (pm *plainMessage) setAMPHtml(h string) {
+	pm.ampHtml = h
+}
+
+func (mm *mimeMessage) setAMPHtml(_ string) {}
 
 // AddTag attaches tags to the message.  Tags are useful for metrics gathering and event tracking purposes.
 // Refer to the Mailgun documentation for further details.
@@ -357,7 +373,7 @@ func (pm *plainMessage) setTemplate(t string) {
 
 func (mm *mimeMessage) setTemplate(t string) {}
 
-// This feature is deprecated for new software.
+// AddCampaign is no longer supported and is deprecated for new software.
 func (m *Message) AddCampaign(campaign string) {
 	m.campaigns = append(m.campaigns, campaign)
 }
@@ -400,23 +416,23 @@ func (m *Message) SetTracking(tracking bool) {
 	m.trackingSet = true
 }
 
-// Refer to the Mailgun documentation for more information.
+// SetTrackingClicks information is found in the Mailgun documentation.
 func (m *Message) SetTrackingClicks(trackingClicks bool) {
 	m.trackingClicks = trackingClicks
 	m.trackingClicksSet = true
 }
 
-// Refer to the Mailgun documentation for more information.
+// SetRequireTLS information is found in the Mailgun documentation.
 func (m *Message) SetRequireTLS(b bool) {
 	m.requireTLS = b
 }
 
-// Refer to the Mailgun documentation for more information.
+// SetSkipVerification information is found in the Mailgun documentation.
 func (m *Message) SetSkipVerification(b bool) {
 	m.skipVerification = b
 }
 
-// Refer to the Mailgun documentation for more information.
+//SetTrackingOpens information is found in the Mailgun documentation.
 func (m *Message) SetTrackingOpens(trackingOpens bool) {
 	m.trackingOpens = trackingOpens
 	m.trackingOpensSet = true
@@ -453,6 +469,17 @@ func (m *Message) AddVariable(variable string, value interface{}) error {
 	return nil
 }
 
+// AddTemplateVariable adds a template variable to the map of template variables, replacing the variable if it is already there.
+// This is used for server-side message templates and can nest arbitrary values. At send time, the resulting map will be converted into
+// a JSON string and sent as a header in the X-Mailgun-Variables header.
+func (m *Message) AddTemplateVariable(variable string, value interface{}) error {
+	if m.templateVariables == nil {
+		m.templateVariables = make(map[string]interface{})
+	}
+	m.templateVariables[variable] = value
+	return nil
+}
+
 // AddDomain allows you to use a separate domain for the type of messages you are sending.
 func (m *Message) AddDomain(domain string) {
 	m.domain = domain
@@ -463,7 +490,7 @@ func (m *Message) GetHeaders() map[string]string {
 	return m.headers
 }
 
-// Returned by `Send()` when the `mailgun.Message` struct is incomplete
+// ErrInvalidMessage is returned by `Send()` when the `mailgun.Message` struct is incomplete
 var ErrInvalidMessage = errors.New("message not valid")
 
 // Send attempts to queue a message (see Message, NewMessage, and its methods) for delivery.
@@ -534,6 +561,13 @@ func (mg *MailgunImpl) Send(ctx context.Context, message *Message) (mes string, 
 			payload.addValue("v:"+variable, value)
 		}
 	}
+	if message.templateVariables != nil {
+		variableString, err := json.Marshal(message.templateVariables)
+		if err == nil {
+			// the map was marshalled as json so add it
+			payload.addValue("h:X-Mailgun-Variables", string(variableString))
+		}
+	}
 	if message.recipientVariables != nil {
 		j, err := json.Marshal(message.recipientVariables)
 		if err != nil {
@@ -601,6 +635,9 @@ func (pm *plainMessage) addValues(p *formDataPayload) {
 	}
 	if pm.template != "" {
 		p.addValue("template", pm.template)
+	}
+	if pm.ampHtml != "" {
+		p.addValue("amp-html", pm.ampHtml)
 	}
 }
 

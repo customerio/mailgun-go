@@ -19,8 +19,8 @@ const (
 	exampleSubject = "Mailgun-go Example Subject"
 	exampleText    = "Testing some Mailgun awesomeness!"
 	exampleHtml    = "<html><head /><body><p>Testing some <a href=\"http://google.com?q=abc&r=def&s=ghi\">Mailgun HTML awesomeness!</a> at www.kc5tja@yahoo.com</p></body></html>"
-
-	exampleMime = `Content-Type: text/plain; charset="ascii"
+	exampleAMPHtml = `<!doctype html><html ⚡4email><head><meta charset="utf-8"><script async src="https://cdn.ampproject.org/v0.js"></script><style amp4email-boilerplate>body{visibility:hidden}</style><style amp-custom>h1{margin: 1rem;}</style></head><body><h1>Hello, I am an AMP EMAIL!</h1></body></html>`
+	exampleMime    = `Content-Type: text/plain; charset="ascii"
 Subject: Joe's Example Subject
 From: Joe Example <joe@example.com>
 To: BARGLEGARF <sam.falvo@rackspace.com>
@@ -103,6 +103,26 @@ func TestSendMGHtml(t *testing.T) {
 		ctx := context.Background()
 		m := mg.NewMessage(fromUser, exampleSubject, exampleText, toUser)
 		m.SetHtml(exampleHtml)
+		msg, id, err := mg.Send(ctx, m)
+		ensure.Nil(t, err)
+		t.Log("TestSendHtml:MSG(" + msg + "),ID(" + id + ")")
+	})
+}
+
+func TestSendMGAMPHtml(t *testing.T) {
+	if reason := SkipNetworkTest(); reason != "" {
+		t.Skip(reason)
+	}
+
+	spendMoney(t, func() {
+		toUser := os.Getenv("MG_EMAIL_TO")
+		mg, err := NewMailgunFromEnv()
+		ensure.Nil(t, err)
+
+		ctx := context.Background()
+		m := mg.NewMessage(fromUser, exampleSubject, exampleText, toUser)
+		m.SetHtml(exampleHtml)
+		m.SetAMPHtml(exampleAMPHtml)
 		msg, id, err := mg.Send(ctx, m)
 		ensure.Nil(t, err)
 		t.Log("TestSendHtml:MSG(" + msg + "),ID(" + id + ")")
@@ -278,20 +298,27 @@ func TestSendMGSeparateDomain(t *testing.T) {
 
 func TestSendMGMessageVariables(t *testing.T) {
 	const (
-		exampleDomain       = "testDomain"
-		exampleAPIKey       = "testAPIKey"
-		toUser              = "test@test.com"
-		exampleMessage      = "Queue. Thank you"
-		exampleID           = "<20111114174239.25659.5820@samples.mailgun.org>"
-		exampleStrVarKey    = "test-str-key"
-		exampleStrVarVal    = "test-str-val"
-		exampleBoolVarKey   = "test-bool-key"
-		exampleBoolVarVal   = "false"
-		exampleMapVarKey    = "test-map-key"
-		exampleMapVarStrVal = `{"test":"123"}`
+		exampleDomain         = "testDomain"
+		exampleAPIKey         = "testAPIKey"
+		toUser                = "test@test.com"
+		exampleMessage        = "Queue. Thank you"
+		exampleID             = "<20111114174239.25659.5820@samples.mailgun.org>"
+		exampleStrVarKey      = "test-str-key"
+		exampleStrVarVal      = "test-str-val"
+		exampleBoolVarKey     = "test-bool-key"
+		exampleBoolVarVal     = "false"
+		exampleMapVarKey      = "test-map-key"
+		exampleMapVarStrVal   = `{"test":"123"}`
+		exampleTemplateStrVal = `{"templateVariable":{"key":{"nested":"yes","status":"test"}}}`
 	)
 	var (
-		exampleMapVarVal = map[string]string{"test": "123"}
+		exampleMapVarVal        = map[string]string{"test": "123"}
+		exampleTemplateVariable = map[string]interface{}{
+			"key": map[string]string{
+				"nested": "yes",
+				"status": "test",
+			},
+		}
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		ensure.DeepEqual(t, req.Method, http.MethodPost)
@@ -304,6 +331,7 @@ func TestSendMGMessageVariables(t *testing.T) {
 		ensure.DeepEqual(t, req.FormValue("v:"+exampleMapVarKey), exampleMapVarStrVal)
 		ensure.DeepEqual(t, req.FormValue("v:"+exampleBoolVarKey), exampleBoolVarVal)
 		ensure.DeepEqual(t, req.FormValue("v:"+exampleStrVarKey), exampleStrVarVal)
+		ensure.DeepEqual(t, req.FormValue("h:X-Mailgun-Variables"), exampleTemplateStrVal)
 		rsp := fmt.Sprintf(`{"message":"%s", "id":"%s"}`, exampleMessage, exampleID)
 		fmt.Fprint(w, rsp)
 	}))
@@ -316,6 +344,7 @@ func TestSendMGMessageVariables(t *testing.T) {
 	m.AddVariable(exampleStrVarKey, exampleStrVarVal)
 	m.AddVariable(exampleBoolVarKey, false)
 	m.AddVariable(exampleMapVarKey, exampleMapVarVal)
+	m.AddTemplateVariable("templateVariable", exampleTemplateVariable)
 
 	msg, id, err := mg.Send(context.Background(), m)
 	ensure.Nil(t, err)
